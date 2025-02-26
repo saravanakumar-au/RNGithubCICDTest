@@ -1,0 +1,135 @@
+name: iOS CI/CD
+
+on:
+  push:
+    branches:
+      - main  # Runs CI/CD on every push to this branch
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    env:
+      CI: false
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Bundler
+        run: gem install bundler
+
+      - name: Install Dependencies
+        run: |
+          npm install
+          cd ios && bundle install && cd ..
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          RCT_NEW_ARCH_ENABLED=0 bundle exec pod install
+          cd ..
+
+      - name: Clean Derived Data
+        run: |
+          cd ios
+          xcodebuild clean -workspace Inertia.xcworkspace \
+                           -scheme Inertia \
+                           -sdk iphonesimulator \
+                           -configuration Debug \
+                           -derivedDataPath build
+
+      - name: Build ios
+        run: |
+          npm run ios
+
+      # - name: Build iOS App for Simulator
+      #   run: |
+      #     cd ios
+      #     xcodebuild -workspace Inertia.xcworkspace \
+      #                -scheme Inertia \
+      #                -sdk iphonesimulator \
+      #                -configuration Debug \
+      #                -derivedDataPath build \
+      #                CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO \
+      #                | xcpretty
+
+      # - name: Build iOS App for Simulator (No Signing)
+      #   run: |
+      #     cd ios
+      #     xcodebuild -workspace Inertia.xcworkspace \
+      #                -scheme Inertia \
+      #                -sdk iphonesimulator \
+      #                -configuration Debug \
+      #                -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO
+                     
+      # - name: Enable Automatic Code Signing
+      #   run: |
+      #     cd ios
+      #     xcodebuild -allowProvisioningUpdates \
+      #                -workspace Inertia.xcworkspace \
+      #                -scheme Inertia \
+      #                -sdk iphoneos \
+      #                -configuration Release \
+      #                -archivePath $GITHUB_WORKSPACE/build/Inertia.xcarchive \
+      #                archive
+
+      # - name: Export IPA
+      #   run: |
+      #     cd ios
+      #     xcodebuild -exportArchive \
+      #                -allowProvisioningUpdates \
+      #                -archivePath $GITHUB_WORKSPACE/build/Inertia.xcarchive \
+      #                -exportPath $GITHUB_WORKSPACE/build \
+      #                -exportOptionsPlist exportOptions.plist
+
+      - name: Upload IPA as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inertia-ios-build
+          path: build/Inertia.ipa
+
+  deploy:
+    needs: build
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install Bundler
+        run: gem install bundler
+
+      - name: Install Dependencies
+        run: |
+          yarn install
+          cd ios && bundle install && cd ..
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          RCT_NEW_ARCH_ENABLED=0 bundle exec pod install
+          cd ..
+
+      - name: Download Built IPA
+        uses: actions/download-artifact@v3
+        with:
+          name: Inertia-ios-build
+          path: build
+
+      - name: Deploy to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        run: |
+          cd ios
+          bundle exec fastlane beta
